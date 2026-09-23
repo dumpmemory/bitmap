@@ -236,6 +236,36 @@ func dimensionsOf(n, m int) uint64 {
 
 // pointersOf returns a pointer to an array containing pointers to the
 // first element of each bitmap and the maximum length of all bitmaps
+// simdBinary is one of the accelerated two-operand primitives.
+type simdBinary func(dst, src unsafe.Pointer, n uint64)
+
+// uniformLen returns the word count shared by every source, or zero when the sources
+// differ in length. The _many primitives apply a single count to all of their inputs,
+// so they can only combine sources that are all the same length.
+func uniformLen(other Bitmap, extra []Bitmap) int {
+	n := len(other)
+	for i := range extra {
+		if len(extra[i]) != n {
+			return 0
+		}
+	}
+	return n
+}
+
+// foldEach applies op to every source in turn, each over its own length. This is what
+// ragged inputs need: a longer source would be truncated by a shared count, a shorter
+// one read past its end.
+func foldEach(dst *Bitmap, op simdBinary, other Bitmap, extra []Bitmap) {
+	if len(other) > 0 {
+		op(unsafe.Pointer(&(*dst)[0]), unsafe.Pointer(&other[0]), uint64(len(other)))
+	}
+	for i := range extra {
+		if len(extra[i]) > 0 {
+			op(unsafe.Pointer(&(*dst)[0]), unsafe.Pointer(&extra[i][0]), uint64(len(extra[i])))
+		}
+	}
+}
+
 func pointersOf(other Bitmap, extra []Bitmap) (unsafe.Pointer, int) {
 	out := make([]unsafe.Pointer, len(extra)+1)
 	out[0] = unsafe.Pointer(&other[0])

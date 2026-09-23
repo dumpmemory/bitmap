@@ -130,6 +130,25 @@ func BenchmarkMany(b *testing.B) {
 	run(b, "and4-batch", func(index Bitmap) {
 		index.And(other, other, other, other)
 	})
+
+	run(b, "or4-batch", func(index Bitmap) {
+		index.Or(other, other, other, other)
+	})
+
+	run(b, "xor4-batch", func(index Bitmap) {
+		index.Xor(other, other, other, other)
+	})
+
+	shorter := make(Bitmap, 1000000/64/2)
+	shorter.Set(1000000 / 2)
+
+	run(b, "or4-batch-ragged", func(index Bitmap) {
+		index.Or(other, other, shorter, other)
+	})
+
+	run(b, "xor4-batch-ragged", func(index Bitmap) {
+		index.Xor(other, other, shorter, other)
+	})
 }
 
 func TestSetRemove(t *testing.T) {
@@ -628,4 +647,57 @@ func testTruthTables(t *testing.T) {
 		a.Xor(Bitmap{0b0101})
 		assert.Equal(t, 0b0110, int(a[0]))
 	}
+}
+
+func TestOrRaggedSizes(t *testing.T) {
+	// Ragged inputs: every set bit must survive regardless of which is longest.
+	var dst Bitmap
+	dst.Set(1)  // word 0
+	dst.Set(70) // word 1
+
+	var other Bitmap
+	other.Set(3)   // word 0
+	other.Set(200) // word 3, beyond every extra bitmap
+
+	var short Bitmap
+	short.Set(5) // word 0 only
+
+	var mid Bitmap
+	mid.Set(130) // word 2
+
+	var long Bitmap
+	long.Set(260) // word 4, beyond other
+
+	dst.Or(other, short, mid, long)
+
+	want := []uint32{1, 70, 3, 200, 5, 130, 260}
+	for _, v := range want {
+		assert.True(t, dst.Contains(v), "missing bit "+strconv.Itoa(int(v)))
+	}
+	assert.Equal(t, len(want), dst.Count())
+}
+
+func TestXorRaggedSizes(t *testing.T) {
+	var dst Bitmap
+	dst.Set(1)
+	dst.Set(200) // shared with other, must cancel out
+
+	var other Bitmap
+	other.Set(200) // cancels dst's bit 200
+	other.Set(201) // survives, beyond every extra bitmap
+
+	var short Bitmap
+	short.Set(5)
+
+	var long Bitmap
+	long.Set(260) // word 4, beyond other
+
+	dst.Xor(other, short, long)
+
+	assert.True(t, dst.Contains(1))
+	assert.False(t, dst.Contains(200), "bit 200 should cancel")
+	assert.True(t, dst.Contains(201), "bit 201 from longer source must survive")
+	assert.True(t, dst.Contains(5))
+	assert.True(t, dst.Contains(260), "bit 260 from longer extra must survive")
+	assert.Equal(t, 4, dst.Count())
 }
